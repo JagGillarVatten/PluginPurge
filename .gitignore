@@ -4,7 +4,6 @@ __pycache__/
 build/
 
 *.spec
-*png
 PluginPurge.py
 release.py
 dist/pluginpurgeapp/_internal/
