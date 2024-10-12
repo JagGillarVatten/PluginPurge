@@ -7,27 +7,23 @@ import winreg
 from concurrent.futures import ThreadPoolExecutor
 from functools import lru_cache
 import threading
-
-# TODO: Consider using a configuration file for paths and other settings
-VST_PATHS = [
-    r"C:\Program Files\VSTPlugins",
-    r"C:\Program Files (x86)\VSTPlugins",
-    r"C:\Program Files\Common Files\VST2",
-    r"C:\Program Files\Common Files\VST3",
-]
+import logging
 
 def resource_path(relative_path):
-    """Get absolute path to resource, works for dev and for PyInstaller"""
+    """
+    Get absolute path to resource, works for dev and for PyInstaller
+    """
     try:
-        # PyInstaller creates a temp folder and stores path in _MEIPASS
         base_path = sys._MEIPASS
     except Exception:
         base_path = os.path.abspath(".")
     return os.path.join(base_path, relative_path)
 
 @lru_cache(maxsize=None)
-def get_vst_paths_from_registry() -> list:
-    """Retrieve VST paths from Windows registry"""
+def get_vst_paths_from_registry():
+    """
+    Retrieve VST paths from the registry
+    """
     paths = []
     try:
         with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\VST") as key:
@@ -42,11 +38,21 @@ def get_vst_paths_from_registry() -> list:
         pass
     return paths
 
-# TODO: Consider making this a class method to avoid global variables
-VST_PATHS.extend(get_vst_paths_from_registry())
+def get_common_plugin_paths():
+    """
+    Get common plugin directory paths
+    """
+    common_paths = [
+        os.path.join(os.environ['ProgramFiles'], 'Common Files', p)
+        for p in ['VST2', 'VST3', r'Avid\Audio\Plug-Ins']
+    ] + [
+        os.path.join(os.environ['ProgramFiles(x86)'], 'Common Files', p)
+        for p in ['VST2', 'VST3', r'Avid\Audio\Plug-Ins']
+    ]
+    return [p for p in common_paths if os.path.exists(p)]
 
 class PluginPurgeApp:
-    def __init__(self, root: tk.Tk) -> None:
+    def __init__(self, root):
         self.root = root
         self.root.title("PluginPurge - Audio Plugin Uninstaller")
         self.plugins = []
@@ -57,8 +63,8 @@ class PluginPurgeApp:
         self.setup_ui()
         self.load_plugins()
 
-    def setup_ui(self) -> None:
-        """Set up the main user interface"""
+    def setup_ui(self):
+        """ Setup the UI components """
         self.root.grid_rowconfigure(0, weight=1)
         self.root.grid_columnconfigure(0, weight=1)
         self.main_frame = ttk.Frame(self.root, padding="10")
@@ -70,8 +76,8 @@ class PluginPurgeApp:
         self.setup_context_menu()
         self.setup_credits()
 
-    def setup_search_bar(self) -> None:
-        """Set up the search bar"""
+    def setup_search_bar(self):
+        """ Setup search bar """
         search_frame = ttk.Frame(self.main_frame)
         search_frame.grid(row=0, column=0, columnspan=3, sticky="ew", pady=(0, 10))
         search_frame.columnconfigure(0, weight=1)
@@ -80,9 +86,9 @@ class PluginPurgeApp:
         self.search_entry.bind("<KeyRelease>", self.filter_plugins)
         ttk.Button(search_frame, text="Search", command=self.filter_plugins).grid(row=0, column=1, padx=(5, 0))
 
-    def setup_treeview(self) -> None:
-        """Set up the treeview for displaying plugins"""
-        self.treeview = ttk.Treeview(self.main_frame, columns=("Name", "Vendor", "Version", "Size", "Path"), show='headings')
+    def setup_treeview(self):
+        """ Setup the treeview for displaying plugins """
+        self.treeview = ttk.Treeview(self.main_frame, columns=("Name", "Company", "Version", "Size", "Format", "Path"), show='headings')
         for col in self.treeview["columns"]:
             self.treeview.heading(col, text=col, command=lambda _col=col: self.treeview_sort_column(_col, False))
             self.treeview.column(col, anchor="w")
@@ -93,98 +99,95 @@ class PluginPurgeApp:
         self.main_frame.grid_rowconfigure(1, weight=1)
         self.main_frame.grid_columnconfigure(0, weight=1)
 
-    def setup_buttons(self) -> None:
-        """Set up the action buttons"""
+    def setup_buttons(self):
+        """ Setup buttons for operations """
         button_frame = ttk.Frame(self.main_frame)
         button_frame.grid(row=2, column=0, columnspan=3, pady=(10, 0))
         ttk.Button(button_frame, text="Uninstall Selected", command=self.uninstall_selected).grid(row=0, column=0, padx=(0, 5))
         ttk.Button(button_frame, text="Refresh", command=self.refresh_plugins).grid(row=0, column=1, padx=(5, 0))
 
-    def setup_status_bar(self) -> None:
-        """Set up the status bar"""
+    def setup_status_bar(self):
+        """ Setup status bar to display messages """
         self.status_var = tk.StringVar()
         ttk.Label(self.main_frame, textvariable=self.status_var, relief=tk.SUNKEN, anchor=tk.W).grid(row=3, column=0, columnspan=3, sticky="ew", pady=(10, 0))
 
-    def setup_context_menu(self) -> None:
-        """Set up the context menu for right-click actions"""
+    def setup_context_menu(self):
+        """ Setup context menu for additional options """
         self.context_menu = tk.Menu(self.root, tearoff=0)
         self.context_menu.add_command(label="Open Folder", command=self.open_plugin_folder)
         self.treeview.bind("<Button-3>", self.show_context_menu)
 
-    def setup_credits(self) -> None:
-        """Set up the credits label"""
-        credits_label = ttk.Label(self.main_frame, text="Created by JagGillarVatten/Pixelody", font=("Arial", 8, "italic"))
-        credits_label.grid(row=4, column=0, columnspan=3, sticky="se", pady=(5, 0))
+    def setup_credits(self):
+        """ Display credits for the application """
+        ttk.Label(self.main_frame, text="Created by JagGillarVatten/Pixelody", font=("Arial", 8, "italic")).grid(row=4, column=0, columnspan=3, sticky="se", pady=(5, 0))
 
-    def show_context_menu(self, event: tk.Event) -> None:
-        """Display the context menu on right-click"""
+    def show_context_menu(self, event):
+        """ Show context menu on right-click """
         item = self.treeview.identify_row(event.y)
         if item:
             self.treeview.selection_set(item)
             self.context_menu.post(event.x_root, event.y_root)
 
-    def open_plugin_folder(self) -> None:
-        """Open the folder containing the selected plugin"""
+    def open_plugin_folder(self):
+        """ Open the folder containing the selected plugin """
         selected_item = self.treeview.selection()
         if selected_item:
             os.startfile(os.path.dirname(self.treeview.item(selected_item[0], 'values')[-1]))
 
-    def load_plugins(self) -> None:
-        """Start loading plugins in a separate thread"""
+    def load_plugins(self):
+        """ Load plugins from directories """
         self.update_status("Loading plugins...")
         threading.Thread(target=self._load_plugins_thread, daemon=True).start()
 
-    def _load_plugins_thread(self) -> None:
-        """Load plugins using a thread pool"""
+    def _load_plugins_thread(self):
+        """ Thread to load plugins in the background """
+        paths = get_vst_paths_from_registry() + get_common_plugin_paths()
         with ThreadPoolExecutor() as executor:
-            self.plugins = [item for sublist in executor.map(self.find_plugins_fast, VST_PATHS) for item in sublist]
+            self.plugins = [item for sublist in executor.map(self.find_plugins_fast, paths) for item in sublist]
         self.root.after(0, self._update_ui_after_load)
 
-    def _update_ui_after_load(self) -> None:
-        """Update UI after plugins are loaded"""
+    def _update_ui_after_load(self):
+        """ Update UI after loading plugins """
         self.display_plugins(self.plugins)
         self.update_status(f"Total plugins: {len(self.plugins)}")
 
-    def find_plugins_fast(self, path: str) -> list:
-        """Find plugins in the given path"""
-        return [
-            p for ext in ['*.dll', '*.vst3', '*.clap'] for p in glob.glob(os.path.join(path, ext))
-        ] if os.path.exists(path) else []
+    def find_plugins_fast(self, path):
+        """ Find plugins quickly in a given directory """
+        return [p for ext in ['*.dll', '*.vst3', '*.aaxplugin', '*.vst'] for p in glob.glob(os.path.join(path, '**', ext), recursive=True)] if os.path.exists(path) else []
 
     @lru_cache(maxsize=1000)
-    def get_plugin_details(self, plugin_path: str) -> dict:
-        """Get details of a plugin"""
+    def get_plugin_details(self, plugin_path):
+        """ Get details of a plugin """
         name = os.path.basename(plugin_path)
-        version = vendor = "Unknown"
+        version = company = "Unknown"
         size = os.path.getsize(plugin_path)
+        format = os.path.splitext(plugin_path)[1][1:].upper()
         try:
             with open(plugin_path, 'rb') as f:
                 content = f.read(4096)
-                vendor_index = content.find(b'Vender: ')
-                if vendor_index != -1:
-                    vendor = content[vendor_index+8:vendor_index+50].split(b'\0', 1)[0].decode('utf-8', errors='ignore')
+                company_index = content.find(b'Company: ')
+                if company_index != -1:
+                    company = content[company_index+9:company_index+50].split(b'\0', 1)[0].decode('utf-8', errors='ignore')
+                if not company or company == "Unknown":
+                    author_index = content.find(b'Author: ')
+                    if author_index != -1:
+                        company = content[author_index+8:author_index+50].split(b'\0', 1)[0].decode('utf-8', errors='ignore')
                 version_index = content.find(b'Version: ')
                 if version_index != -1:
                     version = content[version_index+9:version_index+50].split(b'\0', 1)[0].decode('utf-8', errors='ignore')
         except Exception:
             pass
-        return {'path': plugin_path, 'name': name, 'version': version, 'vendor': vendor, 'size': f"{size / (1024 * 1024):.2f} MB"}
+        return {'path': plugin_path, 'name': name, 'version': version, 'company': company, 'size': f"{size / (1024 * 1024):.2f} MB", 'format': format}
 
-    def display_plugins(self, plugins: list) -> None:
-        """Display plugins in the treeview"""
+    def display_plugins(self, plugins):
+        """ Display plugins in the treeview """
         self.treeview.delete(*self.treeview.get_children())
         for detail in map(self.get_plugin_details, plugins):
-            self.treeview.insert('', 'end', values=(
-                detail['name'],
-                detail['vendor'],
-                detail['version'],
-                detail['size'],
-                detail['path'],
-            ))
+            self.treeview.insert('', 'end', values=(detail['name'], detail['company'], detail['version'], detail['size'], detail['format'], detail['path']))
         self.update_status(f"Displaying {len(plugins)} plugins")
 
-    def uninstall_selected(self) -> None:
-        """Uninstall selected plugins"""
+    def uninstall_selected(self):
+        """ Uninstall selected plugins """
         selected_items = self.treeview.selection()
         if not selected_items:
             messagebox.showwarning("Warning", "No plugins selected!")
@@ -194,52 +197,54 @@ class PluginPurgeApp:
             self.update_status(f"Uninstalled {uninstalled_count} plugin(s)")
             self.refresh_plugins()
 
-    def uninstall_plugin(self, plugin_path: str) -> bool:
-        """Uninstall a single plugin"""
+    def uninstall_plugin(self, plugin_path):
+        """ Uninstall a plugin by removing its file """
         try:
             os.remove(plugin_path)
+            logging.info(f"Successfully uninstalled {plugin_path}")
             return True
+        except PermissionError as e:
+            logging.error(f"Permission error while uninstalling {plugin_path}: {e}")
+            messagebox.showerror("Permission Denied", f"Cannot uninstall {plugin_path}. Permission denied.")
+            return False
+        except FileNotFoundError as e:
+            logging.error(f"Plugin not found {plugin_path}: {e}")
+            return False
         except Exception as e:
+            logging.error(f"Failed to uninstall {plugin_path}: {e}")
             messagebox.showerror("Error", f"Failed to uninstall {plugin_path}: {e}")
             return False
 
-    def filter_plugins(self, event: tk.Event | None = None) -> None:
-        """Filter plugins based on search term"""
+    def filter_plugins(self, event=None):
+        """ Filter plugins based on the search term """
         search_term = self.search_term.get().lower()
-        self.display_plugins([p for p in self.plugins if search_term in os.path.basename(p).lower()])
+        filtered_plugins = [p for p in self.plugins if search_term in os.path.basename(p).lower()]
+        self.display_plugins(filtered_plugins)
+        self.update_status(f"Displaying {len(filtered_plugins)} plugins after filtering")
 
-    def refresh_plugins(self) -> None:
-        """Refresh the plugin list"""
+    def refresh_plugins(self):
+        """ Refresh the plugin list """
         self.plugins.clear()
         self.get_plugin_details.cache_clear()
         self.load_plugins()
 
-    def update_status(self, message: str) -> None:
-        """Update the status bar message"""
+    def update_status(self, message):
+        """ Update the status bar with a message """
         self.status_var.set(message)
+        logging.info(message)
 
-    def treeview_sort_column(self, col: str, reverse: bool) -> None:
-        """Sort treeview column"""
-        l = sorted(((self.treeview.set(k, col), k) for k in self.treeview.get_children('')), reverse=reverse)
+    def treeview_sort_column(self, col, reverse):
+        """ Sort the treeview column """
+        l = [(self.treeview.set(k, col), k) for k in self.treeview.get_children('')]
+        l.sort(reverse=reverse)
         for index, (_, k) in enumerate(l):
             self.treeview.move(k, '', index)
         self.treeview.heading(col, command=lambda: self.treeview_sort_column(col, not reverse))
 
-
 if __name__ == "__main__":
+    logging.info("Starting PluginPurge application")
     root = tk.Tk()
     root.style = ttk.Style()
     root.style.theme_use("clam")
     app = PluginPurgeApp(root)
     root.mainloop()
-
-# TODO: Add error handling for file operations
-# TODO: Implement logging for better debugging
-# TODO: Consider adding a progress bar for long operations
-# TODO: Add option to backup plugins before uninstalling
-# TODO: Implement a way to restore uninstalled plugins
-# TODO: Add support for additional plugin formats
-# TODO: Improve plugin metadata extraction
-# TODO: Add unit tests for core functionality
-# TODO: Implement a plugin scanning scheduler
-# TODO: Add multi-language support

@@ -7,3 +7,4 @@ build/
 PluginPurge.py
 release.py
 dist/pluginpurgeapp/_internal/
+*.log
